@@ -1,49 +1,15 @@
-# Build stage for compilation. Build tools like g++ will not be copied into the final stage to reduce image size.
-FROM ubuntu:18.04
-ARG PMMP_TAG
-ARG COMPILE_SH_ARGS="-f -g"
-ARG PMMP_REPO=pmmp/PocketMine-MP
+FROM ubuntu:1804
 
-RUN test ! -z ${PMMP_TAG} || (echo "Missing build-arg PMMP_TAG" && false)
+ARG PORT
 
-RUN apt-get update && apt-get install --no-install-recommends -y curl ca-certificates build-essential m4 gzip bzip2 bison git cmake autoconf automake pkg-config libtool libtool-bin re2c
+RUN apt update
 
-RUN mkdir /build
-WORKDIR /build
-RUN git clone https://github.com/${PMMP_REPO}.git -b ${PMMP_TAG} --recursive .
-WORKDIR /build/build/php
-RUN ./compile.sh -t linux64 -j ${THREADS:-$(grep -E ^processor /proc/cpuinfo | wc -l)} ${COMPILE_SH_ARGS}
-RUN ln -s /build/build/php/bin/php7/bin/php /usr/bin/php
+RUN mkdir /pmmp
+WORKDIR /pmmp
 
-WORKDIR /build
-RUN curl -L https://getcomposer.org/installer | php
-RUN mv composer.phar /usr/bin/composer
+RUN wget -q -O - https://get.pmmp.io | bash -s -
 
-RUN composer install --classmap-authoritative --no-dev --prefer-source
-RUN if test -d build/preprocessor; then php build/preprocessor/PreProcessor.php --path=src --multisize; else echo "Skipping preprocessor step (preprocessor not found)"; fi
-RUN php $(test -d vendor/pocketmine/bedrock-data && echo -n vendor/pocketmine/bedrock-data || echo -n src/pocketmine/resources/vanilla)/.minify_json.php
-
-RUN php -dphar.readonly=0 build/server-phar.php --git $(git rev-parse HEAD)
-# Just to make sure DevTools didn't false-positive-exit
-RUN test -f /build/PocketMine-MP.phar
-
-FROM ubuntu:18.04
-LABEL maintainer="PMMP Team <team@pmmp.io>"
-
-RUN apt-get update && apt-get install --no-install-recommends -y ca-certificates wget
-
-RUN groupadd -g 1000 pocketmine
 RUN useradd -r -d /pocketmine -p "" -u 1000 -m -g pocketmine pocketmine
-
-WORKDIR /pocketmine
-COPY --from=0 /build/build/php/bin/php7 /usr/php
-RUN grep -q '^extension_dir' /usr/php/bin/php.ini && \
-	sed -ibak "s{^extension_dir=.*{extension_dir=\"$(find /usr/php -name *debug-zts*)\"{" /usr/php/bin/php.ini || echo "extension_dir=\"$(find /usr/php -name *debug-zts*)\"" >> /usr/php/bin/php.ini
-RUN ln -s /usr/php/bin/php /usr/bin/php
-COPY --from=0 /build/PocketMine-MP.phar PocketMine-MP.phar
-ADD start.sh /usr/bin/start-pocketmine
-
-RUN mkdir /plugins /data
 RUN chown 1000:1000 /plugins /data . -R
 RUN chmod o+x /usr/bin/php
 
@@ -51,9 +17,9 @@ USER pocketmine
 
 ENV TERM=xterm
 
-EXPOSE 19132/tcp
-EXPOSE 19132/udp
+RUN ./start.sh --no-wizard
 
-VOLUME ["/data", "/plugins"]
+EXPOSE ${PORT}}/tcp
 
-CMD ["start-pocketmine"]
+EXPOSE ${PORT}}/udp
+
